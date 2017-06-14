@@ -100,6 +100,16 @@ System.register('flarum/mentions/addComposerAutocomplete', ['flarum/extend', 'fl
           var buildSuggestions = function buildSuggestions() {
             var suggestions = [];
 
+            // If the user has started to type a username, then suggest users
+            // matching that username.
+            if (typed) {
+              app.store.all('users').forEach(function (user) {
+                if (user.username().toLowerCase().substr(0, typed.length) !== typed) return;
+
+                suggestions.push(makeSuggestion(user, '@' + user.username(), '', 'MentionsDropdown-user'));
+              });
+            }
+
             // If the user is replying to a discussion, or if they are editing a
             // post, then we can suggest other posts in the discussion to mention.
             // We will add the 5 most recent comments in the discussion which
@@ -117,16 +127,6 @@ System.register('flarum/mentions/addComposerAutocomplete', ['flarum/extend', 'fl
               }).splice(0, 5).forEach(function (post) {
                 var user = post.user();
                 suggestions.push(makeSuggestion(user, '@' + user.username() + '#' + post.id(), [app.translator.trans('flarum-mentions.forum.composer.reply_to_post_text', { number: post.number() }), ' — ', truncate(post.contentPlain(), 200)], 'MentionsDropdown-post'));
-              });
-            }
-
-            // If the user has started to type a username, then suggest users
-            // matching that username.
-            if (typed) {
-              app.store.all('users').forEach(function (user) {
-                if (user.username().toLowerCase().substr(0, typed.length) !== typed) return;
-
-                suggestions.push(makeSuggestion(user, '@' + user.username(), '', 'MentionsDropdown-user'));
               });
             }
 
