@@ -13,7 +13,7 @@ export default class PostMentionedNotification extends Notification {
     const auc = notification.additionalUnreadCount();
     const content = notification.content();
 
-    return app.route.discussion(post.discussion(), auc ? post.number() : (content && content.replyNumber));
+    if(post) return app.route.discussion(post.discussion(), auc ? post.number() : (content && content.replyNumber));
   }
 
   content() {

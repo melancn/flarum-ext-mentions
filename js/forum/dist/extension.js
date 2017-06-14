@@ -1,134 +1,3 @@
-/* jshint browser: true */
-
-(function () {
-
-// The properties that we copy into a mirrored div.
-// Note that some browsers, such as Firefox,
-// do not concatenate properties, i.e. padding-top, bottom etc. -> padding,
-// so we have to do every single property specifically.
-var properties = [
-  'direction',  // RTL support
-  'boxSizing',
-  'width',  // on Chrome and IE, exclude the scrollbar, so the mirror div wraps exactly as the textarea does
-  'height',
-  'overflowX',
-  'overflowY',  // copy the scrollbar for IE
-
-  'borderTopWidth',
-  'borderRightWidth',
-  'borderBottomWidth',
-  'borderLeftWidth',
-  'borderStyle',
-
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
-
-  // https://developer.mozilla.org/en-US/docs/Web/CSS/font
-  'fontStyle',
-  'fontVariant',
-  'fontWeight',
-  'fontStretch',
-  'fontSize',
-  'fontSizeAdjust',
-  'lineHeight',
-  'fontFamily',
-
-  'textAlign',
-  'textTransform',
-  'textIndent',
-  'textDecoration',  // might not make a difference, but better be safe
-
-  'letterSpacing',
-  'wordSpacing',
-
-  'tabSize',
-  'MozTabSize'
-
-];
-
-var isBrowser = (typeof window !== 'undefined');
-var isFirefox = (isBrowser && window.mozInnerScreenX != null);
-
-function getCaretCoordinates(element, position, options) {
-  if(!isBrowser) {
-    throw new Error('textarea-caret-position#getCaretCoordinates should only be called in a browser');
-  }
-
-  var debug = options && options.debug || false;
-  if (debug) {
-    var el = document.querySelector('#input-textarea-caret-position-mirror-div');
-    if ( el ) { el.parentNode.removeChild(el); }
-  }
-
-  // mirrored div
-  var div = document.createElement('div');
-  div.id = 'input-textarea-caret-position-mirror-div';
-  document.body.appendChild(div);
-
-  var style = div.style;
-  var computed = window.getComputedStyle? getComputedStyle(element) : element.currentStyle;  // currentStyle for IE < 9
-
-  // default textarea styles
-  style.whiteSpace = 'pre-wrap';
-  if (element.nodeName !== 'INPUT')
-    style.wordWrap = 'break-word';  // only for textarea-s
-
-  // position off-screen
-  style.position = 'absolute';  // required to return coordinates properly
-  if (!debug)
-    style.visibility = 'hidden';  // not 'display: none' because we want rendering
-
-  // transfer the element's properties to the div
-  properties.forEach(function (prop) {
-    style[prop] = computed[prop];
-  });
-
-  if (isFirefox) {
-    // Firefox lies about the overflow property for textareas: https://bugzilla.mozilla.org/show_bug.cgi?id=984275
-    if (element.scrollHeight > parseInt(computed.height))
-      style.overflowY = 'scroll';
-  } else {
-    style.overflow = 'hidden';  // for Chrome to not render a scrollbar; IE keeps overflowY = 'scroll'
-  }
-
-  div.textContent = element.value.substring(0, position);
-  // the second special handling for input type="text" vs textarea: spaces need to be replaced with non-breaking spaces - http://stackoverflow.com/a/13402035/1269037
-  if (element.nodeName === 'INPUT')
-    div.textContent = div.textContent.replace(/\s/g, '\u00a0');
-
-  var span = document.createElement('span');
-  // Wrapping must be replicated *exactly*, including when a long word gets
-  // onto the next line, with whitespace at the end of the line before (#7).
-  // The  *only* reliable way to do that is to copy the *entire* rest of the
-  // textarea's content into the <span> created at the caret position.
-  // for inputs, just '.' would be enough, but why bother?
-  span.textContent = element.value.substring(position) || '.';  // || because a completely empty faux span doesn't render at all
-  div.appendChild(span);
-
-  var coordinates = {
-    top: span.offsetTop + parseInt(computed['borderTopWidth']),
-    left: span.offsetLeft + parseInt(computed['borderLeftWidth'])
-  };
-
-  if (debug) {
-    span.style.backgroundColor = '#aaa';
-  } else {
-    document.body.removeChild(div);
-  }
-
-  return coordinates;
-}
-
-if (typeof module != 'undefined' && typeof module.exports != 'undefined') {
-  module.exports = getCaretCoordinates;
-} else if(isBrowser){
-  window.getCaretCoordinates = getCaretCoordinates;
-}
-
-}());
-;
 'use strict';
 
 System.register('flarum/mentions/addComposerAutocomplete', ['flarum/extend', 'flarum/components/ComposerBody', 'flarum/helpers/avatar', 'flarum/helpers/username', 'flarum/helpers/highlight', 'flarum/utils/KeyboardNavigatable', 'flarum/utils/string', 'flarum/mentions/components/AutocompleteDropdown'], function (_export, _context) {
@@ -197,111 +66,109 @@ System.register('flarum/mentions/addComposerAutocomplete', ['flarum/extend', 'fl
         dropdown.active = false;
 
         if (mentionStart) {
-          (function () {
-            typed = value.substring(mentionStart, cursor).toLowerCase();
+          typed = value.substring(mentionStart, cursor).toLowerCase();
 
-            var makeSuggestion = function makeSuggestion(user, replacement, content) {
-              var className = arguments.length <= 3 || arguments[3] === undefined ? '' : arguments[3];
+          var makeSuggestion = function makeSuggestion(user, replacement, content) {
+            var className = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : '';
 
-              var username = usernameHelper(user);
-              if (typed) {
-                username.children[0] = highlight(username.children[0], typed);
-              }
-
-              return m(
-                'button',
-                { className: 'PostPreview ' + className,
-                  onclick: function onclick() {
-                    return applySuggestion(replacement);
-                  },
-                  onmouseenter: function onmouseenter() {
-                    dropdown.setIndex($(this).parent().index());
-                  } },
-                m(
-                  'span',
-                  { className: 'PostPreview-content' },
-                  avatar(user),
-                  username,
-                  ' ',
-                  ' ',
-                  content
-                )
-              );
-            };
-
-            var buildSuggestions = function buildSuggestions() {
-              var suggestions = [];
-
-              // If the user is replying to a discussion, or if they are editing a
-              // post, then we can suggest other posts in the discussion to mention.
-              // We will add the 5 most recent comments in the discussion which
-              // match any username characters that have been typed.
-              var composerPost = composer.props.post;
-              var discussion = composerPost && composerPost.discussion() || composer.props.discussion;
-              if (discussion) {
-                discussion.posts().filter(function (post) {
-                  return post && post.contentType() === 'comment' && (!composerPost || post.number() < composerPost.number());
-                }).sort(function (a, b) {
-                  return b.time() - a.time();
-                }).filter(function (post) {
-                  var user = post.user();
-                  return user && user.username().toLowerCase().substr(0, typed.length) === typed;
-                }).splice(0, 5).forEach(function (post) {
-                  var user = post.user();
-                  suggestions.push(makeSuggestion(user, '@' + user.username() + '#' + post.id(), [app.translator.trans('flarum-mentions.forum.composer.reply_to_post_text', { number: post.number() }), ' — ', truncate(post.contentPlain(), 200)], 'MentionsDropdown-post'));
-                });
-              }
-
-              // If the user has started to type a username, then suggest users
-              // matching that username.
-              if (typed) {
-                app.store.all('users').forEach(function (user) {
-                  if (user.username().toLowerCase().substr(0, typed.length) !== typed) return;
-
-                  suggestions.push(makeSuggestion(user, '@' + user.username(), '', 'MentionsDropdown-user'));
-                });
-              }
-
-              if (suggestions.length) {
-                dropdown.props.items = suggestions;
-                m.render($container[0], dropdown.render());
-
-                dropdown.show();
-                var coordinates = getCaretCoordinates(_this, mentionStart);
-                var width = dropdown.$().outerWidth();
-                var height = dropdown.$().outerHeight();
-                var parent = dropdown.$().offsetParent();
-                var left = coordinates.left;
-                var top = coordinates.top + 15;
-                if (top + height > parent.height()) {
-                  top = coordinates.top - height - 15;
-                }
-                if (left + width > parent.width()) {
-                  left = parent.width() - width;
-                }
-                dropdown.show(left, top);
-              }
-            };
-
-            buildSuggestions();
-
-            dropdown.setIndex(0);
-            dropdown.$().scrollTop(0);
-            dropdown.active = true;
-
-            clearTimeout(searchTimeout);
+            var username = usernameHelper(user);
             if (typed) {
-              searchTimeout = setTimeout(function () {
-                var typedLower = typed.toLowerCase();
-                if (searched.indexOf(typedLower) === -1) {
-                  app.store.find('users', { q: typed, page: { limit: 5 } }).then(function () {
-                    if (dropdown.active) buildSuggestions();
-                  });
-                  searched.push(typedLower);
-                }
-              }, 250);
+              username.children[0] = highlight(username.children[0], typed);
             }
-          })();
+
+            return m(
+              'button',
+              { className: 'PostPreview ' + className,
+                onclick: function onclick() {
+                  return applySuggestion(replacement);
+                },
+                onmouseenter: function onmouseenter() {
+                  dropdown.setIndex($(this).parent().index());
+                } },
+              m(
+                'span',
+                { className: 'PostPreview-content' },
+                avatar(user),
+                username,
+                ' ',
+                ' ',
+                content
+              )
+            );
+          };
+
+          var buildSuggestions = function buildSuggestions() {
+            var suggestions = [];
+
+            // If the user is replying to a discussion, or if they are editing a
+            // post, then we can suggest other posts in the discussion to mention.
+            // We will add the 5 most recent comments in the discussion which
+            // match any username characters that have been typed.
+            var composerPost = composer.props.post;
+            var discussion = composerPost && composerPost.discussion() || composer.props.discussion;
+            if (discussion) {
+              discussion.posts().filter(function (post) {
+                return post && post.contentType() === 'comment' && (!composerPost || post.number() < composerPost.number());
+              }).sort(function (a, b) {
+                return b.time() - a.time();
+              }).filter(function (post) {
+                var user = post.user();
+                return user && user.username().toLowerCase().substr(0, typed.length) === typed;
+              }).splice(0, 5).forEach(function (post) {
+                var user = post.user();
+                suggestions.push(makeSuggestion(user, '@' + user.username() + '#' + post.id(), [app.translator.trans('flarum-mentions.forum.composer.reply_to_post_text', { number: post.number() }), ' — ', truncate(post.contentPlain(), 200)], 'MentionsDropdown-post'));
+              });
+            }
+
+            // If the user has started to type a username, then suggest users
+            // matching that username.
+            if (typed) {
+              app.store.all('users').forEach(function (user) {
+                if (user.username().toLowerCase().substr(0, typed.length) !== typed) return;
+
+                suggestions.push(makeSuggestion(user, '@' + user.username(), '', 'MentionsDropdown-user'));
+              });
+            }
+
+            if (suggestions.length) {
+              dropdown.props.items = suggestions;
+              m.render($container[0], dropdown.render());
+
+              dropdown.show();
+              var coordinates = getCaretCoordinates(_this, mentionStart);
+              var width = dropdown.$().outerWidth();
+              var height = dropdown.$().outerHeight();
+              var parent = dropdown.$().offsetParent();
+              var left = coordinates.left;
+              var top = coordinates.top + 15;
+              if (top + height > parent.height()) {
+                top = coordinates.top - height - 15;
+              }
+              if (left + width > parent.width()) {
+                left = parent.width() - width;
+              }
+              dropdown.show(left, top);
+            }
+          };
+
+          buildSuggestions();
+
+          dropdown.setIndex(0);
+          dropdown.$().scrollTop(0);
+          dropdown.active = true;
+
+          clearTimeout(searchTimeout);
+          if (typed) {
+            searchTimeout = setTimeout(function () {
+              var typedLower = typed.toLowerCase();
+              if (searched.indexOf(typedLower) === -1) {
+                app.store.find('users', { q: typed, page: { limit: 5 } }).then(function () {
+                  if (dropdown.active) buildSuggestions();
+                });
+                searched.push(typedLower);
+              }
+            }, 250);
+          }
         }
       });
     });
@@ -346,122 +213,116 @@ System.register('flarum/mentions/addMentionedByList', ['flarum/extend', 'flarum/
       var replies = post.mentionedBy();
 
       if (replies && replies.length) {
-        var _ret = function () {
-          // If there is only one reply, and it's adjacent to this post, we don't
-          // really need to show the list.
-          if (replies.length === 1 && replies[0].number() === post.number() + 1) {
-            return {
-              v: void 0
-            };
-          }
+        // If there is only one reply, and it's adjacent to this post, we don't
+        // really need to show the list.
+        if (replies.length === 1 && replies[0].number() === post.number() + 1) {
+          return;
+        }
 
-          var hidePreview = function hidePreview() {
-            _this.$('.Post-mentionedBy-preview').removeClass('in').one('transitionend', function () {
-              $(this).hide();
-            });
-          };
+        var hidePreview = function hidePreview() {
+          _this.$('.Post-mentionedBy-preview').removeClass('in').one('transitionend', function () {
+            $(this).hide();
+          });
+        };
 
-          var config = function config(element, isInitialized) {
-            if (isInitialized) return;
+        var config = function config(element, isInitialized) {
+          if (isInitialized) return;
 
-            var $this = $(element);
-            var timeout = void 0;
+          var $this = $(element);
+          var timeout = void 0;
 
-            var $preview = $('<ul class="Dropdown-menu Post-mentionedBy-preview fade"/>');
-            $this.append($preview);
+          var $preview = $('<ul class="Dropdown-menu Post-mentionedBy-preview fade"/>');
+          $this.append($preview);
 
-            $this.children().hover(function () {
-              clearTimeout(timeout);
-              timeout = setTimeout(function () {
-                if (!$preview.hasClass('in') && $preview.is(':visible')) return;
+          $this.children().hover(function () {
+            clearTimeout(timeout);
+            timeout = setTimeout(function () {
+              if (!$preview.hasClass('in') && $preview.is(':visible')) return;
 
-                // When the user hovers their mouse over the list of people who have
-                // replied to the post, render a list of reply previews into a
-                // popup.
-                m.render($preview[0], replies.map(function (reply) {
-                  return m(
-                    'li',
-                    { 'data-number': reply.number() },
-                    PostPreview.component({
-                      post: reply,
-                      onclick: hidePreview
-                    })
-                  );
-                }));
-                $preview.show();
-                setTimeout(function () {
-                  return $preview.off('transitionend').addClass('in');
-                });
-              }, 500);
-            }, function () {
-              clearTimeout(timeout);
-              timeout = setTimeout(hidePreview, 250);
-            });
-
-            // Whenever the user hovers their mouse over a particular name in the
-            // list of repliers, highlight the corresponding post in the preview
-            // popup.
-            $this.find('.Post-mentionedBy-summary a').hover(function () {
-              $preview.find('[data-number="' + $(this).data('number') + '"]').addClass('active');
-            }, function () {
-              $preview.find('[data-number]').removeClass('active');
-            });
-          };
-
-          var users = [];
-          var repliers = replies.sort(function (reply) {
-            return reply.user() === app.session.user ? -1 : 0;
-          }).filter(function (reply) {
-            var user = reply.user();
-            if (users.indexOf(user) === -1) {
-              users.push(user);
-              return true;
-            }
+              // When the user hovers their mouse over the list of people who have
+              // replied to the post, render a list of reply previews into a
+              // popup.
+              m.render($preview[0], replies.map(function (reply) {
+                return m(
+                  'li',
+                  { 'data-number': reply.number() },
+                  PostPreview.component({
+                    post: reply,
+                    onclick: hidePreview
+                  })
+                );
+              }));
+              $preview.show();
+              setTimeout(function () {
+                return $preview.off('transitionend').addClass('in');
+              });
+            }, 500);
+          }, function () {
+            clearTimeout(timeout);
+            timeout = setTimeout(hidePreview, 250);
           });
 
-          var limit = 4;
-          var overLimit = repliers.length > limit;
-
-          // Create a list of unique users who have replied. So even if a user has
-          // replied twice, they will only be in this array once.
-          var names = repliers.slice(0, overLimit ? limit - 1 : limit).map(function (reply) {
-            var user = reply.user();
-
-            return m(
-              'a',
-              { href: app.route.post(reply),
-                config: m.route,
-                onclick: hidePreview,
-                'data-number': reply.number() },
-              app.session.user === user ? app.translator.trans('flarum-mentions.forum.post.you_text') : username(user)
-            );
+          // Whenever the user hovers their mouse over a particular name in the
+          // list of repliers, highlight the corresponding post in the preview
+          // popup.
+          $this.find('.Post-mentionedBy-summary a').hover(function () {
+            $preview.find('[data-number="' + $(this).data('number') + '"]').addClass('active');
+          }, function () {
+            $preview.find('[data-number]').removeClass('active');
           });
+        };
 
-          // If there are more users that we've run out of room to display, add a "x
-          // others" name to the end of the list. Clicking on it will display a modal
-          // with a full list of names.
-          if (overLimit) {
-            var count = repliers.length - names.length;
-
-            names.push(app.translator.transChoice('flarum-mentions.forum.post.others_text', count, { count: count }));
+        var users = [];
+        var repliers = replies.sort(function (reply) {
+          return reply.user() === app.session.user ? -1 : 0;
+        }).filter(function (reply) {
+          var user = reply.user();
+          if (users.indexOf(user) === -1) {
+            users.push(user);
+            return true;
           }
+        });
 
-          items.add('replies', m(
-            'div',
-            { className: 'Post-mentionedBy', config: config },
-            m(
-              'span',
-              { className: 'Post-mentionedBy-summary' },
-              icon('reply'),
-              app.translator.transChoice('flarum-mentions.forum.post.mentioned_by' + (replies[0].user() === app.session.user ? '_self' : '') + '_text', names.length, {
-                count: names.length,
-                users: punctuateSeries(names)
-              })
-            )
-          ));
-        }();
+        var limit = 4;
+        var overLimit = repliers.length > limit;
 
-        if ((typeof _ret === 'undefined' ? 'undefined' : babelHelpers.typeof(_ret)) === "object") return _ret.v;
+        // Create a list of unique users who have replied. So even if a user has
+        // replied twice, they will only be in this array once.
+        var names = repliers.slice(0, overLimit ? limit - 1 : limit).map(function (reply) {
+          var user = reply.user();
+
+          return m(
+            'a',
+            { href: app.route.post(reply),
+              config: m.route,
+              onclick: hidePreview,
+              'data-number': reply.number() },
+            app.session.user === user ? app.translator.trans('flarum-mentions.forum.post.you_text') : username(user)
+          );
+        });
+
+        // If there are more users that we've run out of room to display, add a "x
+        // others" name to the end of the list. Clicking on it will display a modal
+        // with a full list of names.
+        if (overLimit) {
+          var count = repliers.length - names.length;
+
+          names.push(app.translator.transChoice('flarum-mentions.forum.post.others_text', count, { count: count }));
+        }
+
+        items.add('replies', m(
+          'div',
+          { className: 'Post-mentionedBy', config: config },
+          m(
+            'span',
+            { className: 'Post-mentionedBy-summary' },
+            icon('reply'),
+            app.translator.transChoice('flarum-mentions.forum.post.mentioned_by' + (replies[0].user() === app.session.user ? '_self' : '') + '_text', names.length, {
+              count: names.length,
+              users: punctuateSeries(names)
+            })
+          )
+        ));
       }
     });
   }
@@ -542,56 +403,54 @@ System.register('flarum/mentions/addPostMentionPreviews', ['flarum/extend', 'fla
           // Otherwise, we will show a popup preview of the post. If the post
           // hasn't yet been loaded, we will need to do that.
           if (!visible) {
-            (function () {
-              // Position the preview so that it appears above the mention.
-              // (The offsetParent should be .Post-body.)
-              var positionPreview = function positionPreview() {
-                var previewHeight = $preview.outerHeight(true);
-                var offset = 0;
+            // Position the preview so that it appears above the mention.
+            // (The offsetParent should be .Post-body.)
+            var positionPreview = function positionPreview() {
+              var previewHeight = $preview.outerHeight(true);
+              var offset = 0;
 
-                // If the preview goes off the top of the viewport, reposition it to
-                // be below the mention.
-                if ($this.offset().top - previewHeight < $(window).scrollTop() + $('#header').outerHeight()) {
-                  offset += $this.outerHeight(true);
-                } else {
-                  offset -= previewHeight;
-                }
-
-                $preview.show().css('top', $this.offset().top - $parentPost.offset().top + offset).css('left', $this.offsetParent().offset().left - $parentPost.offset().left).css('max-width', $this.offsetParent().width());
-              };
-
-              var showPost = function showPost(post) {
-                var discussion = post.discussion();
-
-                m.render($preview[0], [discussion !== parentPost.discussion() ? m(
-                  'li',
-                  null,
-                  m(
-                    'span',
-                    { className: 'PostMention-preview-discussion' },
-                    discussion.title()
-                  )
-                ) : '', m(
-                  'li',
-                  null,
-                  PostPreview.component({ post: post })
-                )]);
-                positionPreview();
-              };
-
-              var post = app.store.getById('posts', id);
-              if (post && post.discussion()) {
-                showPost(post);
+              // If the preview goes off the top of the viewport, reposition it to
+              // be below the mention.
+              if ($this.offset().top - previewHeight < $(window).scrollTop() + $('#header').outerHeight()) {
+                offset += $this.outerHeight(true);
               } else {
-                m.render($preview[0], LoadingIndicator.component());
-                app.store.find('posts', id).then(showPost);
-                positionPreview();
+                offset -= previewHeight;
               }
 
-              setTimeout(function () {
-                return $preview.off('transitionend').addClass('in');
-              });
-            })();
+              $preview.show().css('top', $this.offset().top - $parentPost.offset().top + offset).css('left', $this.offsetParent().offset().left - $parentPost.offset().left).css('max-width', $this.offsetParent().width());
+            };
+
+            var showPost = function showPost(post) {
+              var discussion = post.discussion();
+
+              m.render($preview[0], [discussion !== parentPost.discussion() ? m(
+                'li',
+                null,
+                m(
+                  'span',
+                  { className: 'PostMention-preview-discussion' },
+                  discussion.title()
+                )
+              ) : '', m(
+                'li',
+                null,
+                PostPreview.component({ post: post })
+              )]);
+              positionPreview();
+            };
+
+            var post = app.store.getById('posts', id);
+            if (post && post.discussion()) {
+              showPost(post);
+            } else {
+              m.render($preview[0], LoadingIndicator.component());
+              app.store.find('posts', id).then(showPost);
+              positionPreview();
+            }
+
+            setTimeout(function () {
+              return $preview.off('transitionend').addClass('in');
+            });
           }
         };
 
@@ -754,7 +613,7 @@ System.register('flarum/mentions/components/AutocompleteDropdown', ['flarum/Comp
 
         function AutocompleteDropdown() {
           babelHelpers.classCallCheck(this, AutocompleteDropdown);
-          return babelHelpers.possibleConstructorReturn(this, Object.getPrototypeOf(AutocompleteDropdown).apply(this, arguments));
+          return babelHelpers.possibleConstructorReturn(this, (AutocompleteDropdown.__proto__ || Object.getPrototypeOf(AutocompleteDropdown)).apply(this, arguments));
         }
 
         babelHelpers.createClass(AutocompleteDropdown, [{
@@ -873,7 +732,7 @@ System.register('flarum/mentions/components/MentionsUserPage', ['flarum/componen
 
         function MentionsUserPage() {
           babelHelpers.classCallCheck(this, MentionsUserPage);
-          return babelHelpers.possibleConstructorReturn(this, Object.getPrototypeOf(MentionsUserPage).apply(this, arguments));
+          return babelHelpers.possibleConstructorReturn(this, (MentionsUserPage.__proto__ || Object.getPrototypeOf(MentionsUserPage)).apply(this, arguments));
         }
 
         babelHelpers.createClass(MentionsUserPage, [{
@@ -916,7 +775,7 @@ System.register('flarum/mentions/components/PostMentionedNotification', ['flarum
 
         function PostMentionedNotification() {
           babelHelpers.classCallCheck(this, PostMentionedNotification);
-          return babelHelpers.possibleConstructorReturn(this, Object.getPrototypeOf(PostMentionedNotification).apply(this, arguments));
+          return babelHelpers.possibleConstructorReturn(this, (PostMentionedNotification.__proto__ || Object.getPrototypeOf(PostMentionedNotification)).apply(this, arguments));
         }
 
         babelHelpers.createClass(PostMentionedNotification, [{
@@ -932,7 +791,7 @@ System.register('flarum/mentions/components/PostMentionedNotification', ['flarum
             var auc = notification.additionalUnreadCount();
             var content = notification.content();
 
-            return app.route.discussion(post.discussion(), auc ? post.number() : content && content.replyNumber);
+            if (post) return app.route.discussion(post.discussion(), auc ? post.number() : content && content.replyNumber);
           }
         }, {
           key: 'content',
@@ -979,7 +838,7 @@ System.register('flarum/mentions/components/PostQuoteButton', ['flarum/component
 
         function PostQuoteButton() {
           babelHelpers.classCallCheck(this, PostQuoteButton);
-          return babelHelpers.possibleConstructorReturn(this, Object.getPrototypeOf(PostQuoteButton).apply(this, arguments));
+          return babelHelpers.possibleConstructorReturn(this, (PostQuoteButton.__proto__ || Object.getPrototypeOf(PostQuoteButton)).apply(this, arguments));
         }
 
         babelHelpers.createClass(PostQuoteButton, [{
@@ -1001,7 +860,7 @@ System.register('flarum/mentions/components/PostQuoteButton', ['flarum/component
               return e.stopPropagation();
             };
 
-            return babelHelpers.get(Object.getPrototypeOf(PostQuoteButton.prototype), 'view', this).call(this);
+            return babelHelpers.get(PostQuoteButton.prototype.__proto__ || Object.getPrototypeOf(PostQuoteButton.prototype), 'view', this).call(this);
           }
         }, {
           key: 'config',
@@ -1053,7 +912,7 @@ System.register('flarum/mentions/components/UserMentionedNotification', ['flarum
 
         function UserMentionedNotification() {
           babelHelpers.classCallCheck(this, UserMentionedNotification);
-          return babelHelpers.possibleConstructorReturn(this, Object.getPrototypeOf(UserMentionedNotification).apply(this, arguments));
+          return babelHelpers.possibleConstructorReturn(this, (UserMentionedNotification.__proto__ || Object.getPrototypeOf(UserMentionedNotification)).apply(this, arguments));
         }
 
         babelHelpers.createClass(UserMentionedNotification, [{
